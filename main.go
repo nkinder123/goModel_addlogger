@@ -1,7 +1,6 @@
 package main
 
 import (
-	"Gin/config"
 	"Gin/logger"
 	"Gin/routers"
 	"fmt"
@@ -25,12 +24,7 @@ func Println(str1 string, str2 string) string {
 func main() {
 
 	// init logger
-	if err := logger.InitLogger(config.Conf.LogConfig); err != nil {
-		fmt.Printf("init logger failed, err:%v\n", err)
-		return
-	}
-
-	gin.SetMode(config.Conf.Mode)
+	logger.LoggerInit()
 	//创造路由
 	r := gin.Default()
 	r.Use(logger.GinLogger(), logger.GinRecovery(true))
@@ -59,6 +53,5 @@ func main() {
 		c.String(http.StatusOK, "hello liwenzhou.com")
 	})
 
-	addr := fmt.Sprintf(":%v", config.Conf.Port)
-	r.Run(addr)
+	r.Run()
 }

@@ -1,7 +1,10 @@
 package logger
 
 import (
-	"Gin/config"
+	"github.com/gin-gonic/gin"
+	"github.com/natefinch/lumberjack"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -9,52 +12,62 @@ import (
 	"runtime/debug"
 	"strings"
 	"time"
-
-	"github.com/gin-gonic/gin"
-	"github.com/natefinch/lumberjack"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
-var lg *zap.Logger
+var ls *zap.Logger
 
-// InitLogger 初始化Logger
-func InitLogger(cfg *config.LogConfig) (err error) {
-	writeSyncer := getLogWriter(cfg.Filename, cfg.MaxSize, cfg.MaxBackups, cfg.MaxAge)
-	encoder := getEncoder()
-	var l = new(zapcore.Level)
-	err = l.UnmarshalText([]byte(cfg.Level))
+func LoggerInit() {
+	enc := EncodingWay()
+	ws := IoPath()
+	core := zapcore.NewCore(enc, ws, zap.DebugLevel)
+	ls = zap.New(core, zap.AddCaller())
+}
+
+// 将日志信息进行encoding
+func EncodingWay() zapcore.Encoder {
+	config := zapcore.EncoderConfig{
+		TimeKey:        "ts",
+		LevelKey:       "level",
+		NameKey:        "logger",
+		CallerKey:      "caller",
+		FunctionKey:    zapcore.OmitKey,
+		MessageKey:     "msg",
+		StacktraceKey:  "stacktrace",
+		LineEnding:     zapcore.DefaultLineEnding,
+		EncodeLevel:    zapcore.LowercaseLevelEncoder,
+		EncodeTime:     zapcore.ISO8601TimeEncoder,
+		EncodeDuration: zapcore.SecondsDurationEncoder,
+		EncodeCaller:   zapcore.ShortCallerEncoder,
+	}
+	return zapcore.NewConsoleEncoder(config)
+}
+
+// 将zap创建日志存储日志构过程，用lumberjack进行封装实现切割存储备份效果
+func IoPath() zapcore.WriteSyncer {
+	lumberJacklogger := &lumberjack.Logger{
+		Filename:   "./test.log",
+		MaxSize:    200,
+		MaxAge:     30,
+		MaxBackups: 5,
+		Compress:   false,
+	}
+	//WriteSyncer是一个结构体，AddSync的方法返回值是WriteSyncer，可以将AddSync看作是一个封装方法
+	return zapcore.AddSync(lumberJacklogger)
+}
+
+// 封装get请求
+func simpleHttpGet(url string) {
+	con, err := http.Get(url)
 	if err != nil {
-		return
+		ls.Error("error fetch url..",
+			zap.String("url", url),
+			zap.Error(err))
+	} else {
+		ls.Info("success",
+			zap.String("status", con.Status),
+			zap.String("url", url))
 	}
-	core := zapcore.NewCore(encoder, writeSyncer, l)
-
-	lg = zap.New(core, zap.AddCaller())
-	zap.ReplaceGlobals(lg) // 替换zap包中全局的logger实例，后续在其他包中只需使用zap.L()调用即可
-	return
 }
-
-func getEncoder() zapcore.Encoder {
-	encoderConfig := zap.NewProductionEncoderConfig()
-	encoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
-	encoderConfig.TimeKey = "time"
-	encoderConfig.EncodeLevel = zapcore.CapitalLevelEncoder
-	encoderConfig.EncodeDuration = zapcore.SecondsDurationEncoder
-	encoderConfig.EncodeCaller = zapcore.ShortCallerEncoder
-	return zapcore.NewJSONEncoder(encoderConfig)
-}
-
-func getLogWriter(filename string, maxSize, maxBackup, maxAge int) zapcore.WriteSyncer {
-	lumberJackLogger := &lumberjack.Logger{
-		Filename:   filename,
-		MaxSize:    maxSize,
-		MaxBackups: maxBackup,
-		MaxAge:     maxAge,
-	}
-	return zapcore.AddSync(lumberJackLogger)
-}
-
-// GinLogger 接收gin框架默认的日志
 func GinLogger() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
@@ -63,7 +76,7 @@ func GinLogger() gin.HandlerFunc {
 		c.Next()
 
 		cost := time.Since(start)
-		lg.Info(path,
+		ls.Info(path,
 			zap.Int("status", c.Writer.Status()),
 			zap.String("method", c.Request.Method),
 			zap.String("path", path),
@@ -94,7 +107,7 @@ func GinRecovery(stack bool) gin.HandlerFunc {
 
 				httpRequest, _ := httputil.DumpRequest(c.Request, false)
 				if brokenPipe {
-					lg.Error(c.Request.URL.Path,
+					ls.Error(c.Request.URL.Path,
 						zap.Any("error", err),
 						zap.String("request", string(httpRequest)),
 					)
@@ -105,13 +118,13 @@ func GinRecovery(stack bool) gin.HandlerFunc {
 				}
 
 				if stack {
-					lg.Error("[Recovery from panic]",
+					ls.Error("[Recovery from panic]",
 						zap.Any("error", err),
 						zap.String("request", string(httpRequest)),
 						zap.String("stack", string(debug.Stack())),
 					)
 				} else {
-					lg.Error("[Recovery from panic]",
+					ls.Error("[Recovery from panic]",
 						zap.Any("error", err),
 						zap.String("request", string(httpRequest)),
 					)
