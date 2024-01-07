@@ -1,11 +1,13 @@
 package main
 
 import (
+	"Gin/config"
+	"Gin/logger"
 	"Gin/routers"
 	"fmt"
-	"github.com/gin-contrib/sessions"
-	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
+	"net/http"
 	"text/template"
 	"time"
 )
@@ -21,19 +23,42 @@ func Println(str1 string, str2 string) string {
 }
 
 func main() {
+
+	// init logger
+	if err := logger.InitLogger(config.Conf.LogConfig); err != nil {
+		fmt.Printf("init logger failed, err:%v\n", err)
+		return
+	}
+
+	gin.SetMode(config.Conf.Mode)
+	//创造路由
 	r := gin.Default()
+	r.Use(logger.GinLogger(), logger.GinRecovery(true))
+	//配置templates的方法
 	r.SetFuncMap(template.FuncMap{
 		"UnixToTime": UnixToTime,
 		"Println":    Println,
 	})
+	//加载静态页面路径
 	r.LoadHTMLGlob("templates/**/*")
-	store := cookie.NewStore([]byte("secret"))
-	r.Use(sessions.Sessions("session", store))
 
+	//定义后端路由
 	routers.AdminRoutersInit(r)
 	routers.ApiRoutersInit(r)
 	routers.DefaultRoutersInit(r)
 
-	//将get传值绑定到结构体上
-	r.Run()
+	r.GET("/hello", func(c *gin.Context) {
+		// 假设你有一些数据需要记录到日志中
+		var (
+			name = "q1mi"
+			age  = 18
+		)
+		// 记录日志并使用zap.Xxx(key, val)记录相关字段
+		zap.L().Debug("this is hello func", zap.String("user", name), zap.Int("age", age))
+
+		c.String(http.StatusOK, "hello liwenzhou.com")
+	})
+
+	addr := fmt.Sprintf(":%v", config.Conf.Port)
+	r.Run(addr)
 }
